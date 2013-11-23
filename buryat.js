@@ -1,60 +1,59 @@
 /**
 
-    buryat.js - A tiny, self-contained, single-file database that aims to support a useful
+    buryat.js   A tiny, self-contained, single-file database that aims to support a useful
                 subset of MongoDB commands.  Its per-DB storage is a single JSON string, which can be 
                 stored anywhere: in the file-system of the server, or localStorage in the browser.
-                see: buryat.org for more details and documentation, https://github.com/gmn/buryat
-                for upcoming releases and code.
+                See buryat.org for more details and documentation, https://github.com/gmn/buryat
+                for new releases and code.
   
-   TODO:
-    X find()
-    X RegExp
-    X sort()
-    X limit()
-    X update()
-    X $or
-    X $gt
-    X $lt
-    X $gte
-    X $lte
-    X remove()
-    X upsert
-    X $exists   Selects the documents that contain the field if <boolean> is true. 
-                If <boolean> is false, the query only returns the documents that do not contain the field. 
-                { field: { $exists: <boolean> } }
-    X db.find( {$or: [{watched:{$exists:false}},{watched:false}]} ).sort({_id:1});
-
-    - skip()
-    - distinct()
-    - specifying which fields are returned
-    - matching key:[array,..]
-    - matching subdocuments; partial match subdocuments
-    - $unset ? (remove key from rows)
-    - $rename ? (rename key in rows)
-    - $not, 
-    - $ne
-    - update().limit()
-    - remove().limit()
-    - speed-up, tune performance
-    - open.prototype
 */
 
 (function() 
 {
-    var path        = require('path');
-    var fs          = require('fs');
-    var lib         = require('./lib.js');
-    var type_of     = lib.type_of;
+
+    function type_of( t ) {
+        var s = typeof t;
+        switch( s ) {
+        case "object":
+            if ( t instanceof Date ) {
+                return "date";
+            }
+            else if ( t instanceof Array ) {
+                return "array";
+            }
+            else if ( t instanceof RegExp ) {
+                return "regexp";
+            }
+        default:
+            return s;
+        }
+    }
+
+    function select_platform() {
+        var platform = "unknown";
+        try {
+            if ( exports !== undefined )
+                platform = "node_module";
+        } catch(e) {
+            try {
+                if ( window !== undefined )
+                    platform = "browser";
+            } catch(e) {
+            }
+        }
+        return platform;
+    }
 
 
     /**
-        - opens database
-        - database created if it doesn't exist
-        - returns db handle
-        // TODO: open.prototype to reduce cruft in multiple instances
+        - opens physical database (new one is created if non-existent)
+        - returns handle to new db_object
     */
     var open = function ( config ) 
     {
+        var path        = require('path');
+        var fs          = require('fs');
+
 
         // private variables
         var parm_list = ['db_name','db_dir','db_path'];
@@ -99,16 +98,16 @@
         //  [{key:key1,value:[{key:key2,value:val2},{key:key3,value:val3}]}]
         function _getKeys( O ) {
             var keys = [];
-            if ( lib.type_of(O) !== "object" )
+            if ( type_of(O) !== "object" )
                 return null;
             for ( i in O ) 
             {
                 if ( O.hasOwnProperty(i) ) 
                 {
-                    var _val = lib.type_of(O[i]) === "object" ? 
+                    var _val = type_of(O[i]) === "object" ? 
                             _getKeys(O[i]) : O[i];
 
-                    if ( lib.type_of(_val) === "array" && _val.length === 1 )
+                    if ( type_of(_val) === "array" && _val.length === 1 )
                         _val = _val[0]; // ditch the array if only 1 elt
                         
                     keys.push( {key:i,value:_val} );
@@ -147,7 +146,7 @@
         // sorts in place
         function sortArrayOfObjectsByKeys( array_of_objs )
         {  
-            if ( lib.type_of(array_of_objs) !== "array" )
+            if ( type_of(array_of_objs) !== "array" )
                 return array_of_objs;
 
             if ( array_of_objs.length === 0 )
@@ -169,7 +168,7 @@
         // query matching functions
         function detect_clause_type( key, value )
         {
-            switch ( lib.type_of(value) )
+            switch ( type_of(value) )
             {
             case "boolean":
             case "date":
@@ -218,7 +217,7 @@
                     if ( row.hasOwnProperty(key) && key === test.key ) 
                     {
                         // RegExps: equiv to SQL "like" statement
-                        if ( lib.type_of( test.value ) === "regexp" ) {
+                        if ( type_of( test.value ) === "regexp" ) {
                             var sval = row[key] + '';
                             if ( sval.match( test.value ) ) {
                                 res.push( row );
@@ -345,7 +344,7 @@
                         switch ( clausetype )
                         {
                         case "CLAUSE_NORMAL":
-                            if ( lib.type_of( test.value ) === "regexp" ) {
+                            if ( type_of( test.value ) === "regexp" ) {
                                 if ( row[test.key].match( test.value ) ) {
                                     res.push( row );
                                     continue next_row;
@@ -410,7 +409,7 @@
             var result = master;
 
             // CLAUSE_EMPTY
-            if ( !clauses || (lib.type_of(clauses)==="object" && _firstKey(clauses)===null) ) {
+            if ( !clauses || (type_of(clauses)==="object" && _firstKey(clauses)===null) ) {
                 return result;
             }
 
@@ -467,7 +466,7 @@
 
             // sort of a copy-constructor. If Array of Obj is passed in,
             //  we clone it into _data 
-            if ( arguments.length === 1 && lib.type_of(arg) === "array" ) 
+            if ( arguments.length === 1 && type_of(arg) === "array" ) 
             {
                 for ( var i = 0, l = arg.length; i < l; i++ ) {
                     this.push( arg[i] );
@@ -476,7 +475,7 @@
         }
         dbresult.prototype = {
             push: function( O ) {
-                if ( lib.type_of(O) === "object" )
+                if ( type_of(O) === "object" )
                     this._data.push(JSON.parse(JSON.stringify(O)));
                 this.length = this._data.length;
                 return this;
@@ -509,7 +508,7 @@
 
             limit: function( _l ) {
                 var lim = Number(_l);
-                if ( lib.type_of(lim) !== "number" )
+                if ( type_of(lim) !== "number" )
                     return this;
                 this._data.splice( lim, this._data.length - lim );
                 this.length = this._data.length;
@@ -545,8 +544,13 @@
 
         this.save = function() 
         {
-            if ( !lib.write_file( this.db_path, JSON.stringify(master) ) )
-                console.log( "error: failed to write database: "+this.db_name );
+            var _mode = mode || 0666;
+            try {
+                fs.writeFileSync( this.db_path, JSON.stringify(master), {encoding:"utf8",mode:_mode,flag:'w'} );
+            }
+            catch(e) {
+                console.log( "error: failed to write: \""+this.db_path+'"' );
+            }
         }; // this.save
 
 
@@ -556,7 +560,7 @@
 
             function insert_one( obj )
             {
-                if ( lib.type_of( obj ) !== "object" ) {
+                if ( type_of( obj ) !== "object" ) {
                     return -1;
                 }
 
@@ -569,7 +573,7 @@
             }
 
 
-            if ( lib.type_of( Arg ) === "array" ) 
+            if ( type_of( Arg ) === "array" ) 
             {
                 for ( var i = 0, l = Arg.length; i < l; i++ ) {
                     id_set = insert_one( Arg[i] );
@@ -597,11 +601,11 @@
             if ( arguments.length < 2 )
                 return 0;
 
-            if ( lib.type_of(query) !== "object" ||
-                lib.type_of(update) !== "object" )
+            if ( type_of(query) !== "object" ||
+                type_of(update) !== "object" )
                 return 0;
 
-            if ( arguments.length === 3 && lib.type_of(options) !== "object" )
+            if ( arguments.length === 3 && type_of(options) !== "object" )
                 return 0;
 
             var set = update['$set'];
@@ -665,7 +669,7 @@
         {
             if ( arguments.length === 0 )
                 var constraints = {};
-            if ( lib.type_of(constraints) !== "object" )
+            if ( type_of(constraints) !== "object" )
                 return 0;
 
             var rows_altered = 0;
@@ -742,7 +746,7 @@
         {
             try {
                 // is file 
-                data = fs.readFileSync(config,{encoding:"utf8"}) || 0; // throws if Directory or File doesn't exist
+                data = fs.readFileSync(config,{encoding:"utf8"}); // throws if Directory or File doesn't exist
 
                 // fullpath
                 this.db_path = path.resolve(config);
@@ -828,8 +832,9 @@
         //
         // read in db if it's there
         //
-        if ( fs.existsSync( this.db_path ) ) {
-            data = lib.read_file( this.db_path );
+        if ( fs.existsSync( this.db_path ) ) 
+        {
+            data = fs.readFileSync(this.db_path,{encoding:"utf8"});
 
             // convert into master format
             master = JSON.parse( data );
