@@ -8,8 +8,14 @@
   
 */
 
-(function() 
+(function(buryat) 
 {
+    //////////////////////////////////////////////////
+    //
+    // utility functions, internal
+    //
+
+    var p = function(s) { console.log(s); };
 
     function type_of( t ) {
         var s = typeof t;
@@ -29,7 +35,7 @@
         }
     }
 
-    function select_platform() {
+    function detect_platform() {
         var platform = "unknown";
         try {
             if ( exports !== undefined )
@@ -45,58 +51,351 @@
     }
 
 
+    //////////////////////////////////////////////////
+    // 
+    // Classes
+    // 
+
     /**
-        - opens physical database (new one is created if non-existent)
-        - returns handle to new db_object
-    */
-    var open = function ( config ) 
+     *
+     * Class: db_result
+     *
+     */
+    function db_result( arg ) 
     {
-        var path        = require('path');
-        var fs          = require('fs');
+        this.length = 0;
+        this._data = [];            
 
+        // sort of a copy-constructor. If Array of Obj is passed in,
+        //  we clone it into _data 
+        if ( arguments.length === 1 && type_of(arg) === "array" ) 
+        {
+            for ( var i = 0, l = arg.length; i < l; i++ ) {
+                this.push( arg[i] );
+            }
+        }
+    }
 
-        // private variables
-        var parm_list = ['db_name','db_dir','db_path'];
-        var data = 0;
-        var that = this;
+    db_result.prototype = {
+        push: function( O ) {
+            if ( type_of(O) === "object" )
+                this._data.push(JSON.parse(JSON.stringify(O)));
+            this.length = this._data.length;
+            return this;
+        },
+
+        /* 
+         SELECT * FROM users WHERE status = "A" ORDER BY user_id ASC
+           db.users.find( { status: "A" } ).sort( { user_id: 1 } )
+         SELECT * FROM users WHERE status = "A" ORDER BY user_id DESC
+           db.users.find( { status: "A" } ).sort( { user_id: -1 } ) 
+        */
+        sort: function( O ) {
+            var key = _firstKey(O);
+            var val = O[key];
+
+            this._data.sort(function(a,b) 
+            {
+                if ( !a[key] )
+                    return -val;
+                else if ( !b[key] )
+                    return val;
+                if ( typeof a[key] === "string" && typeof b[key] === "string" )
+                    return a[key].localeCompare(b[key]) * val;
+                else
+                    return a[key] > b[key] ? val : -val;
+            });
+
+            return this;
+        },
+
+        limit: function( _l ) {
+            var lim = Number(_l);
+            if ( type_of(lim) !== "number" )
+                return this;
+            this._data.splice( lim, this._data.length - lim );
+            this.length = this._data.length;
+            return this;
+        },
+
+        skip: function( O ) {
+            return this;
+        },
+
+        distinct: function( O ) {
+            return this;
+        },
+
+        count: function() {
+            return this._data.length;
+        },
+
+        getArray: function() {
+            return this._data;
+        },
+        get_json: function(fmt) {
+            if ( arguments.length === 0 )
+                return JSON.stringify(this._data);
+            return JSON.stringify(this._data,null,fmt);
+        }
+    }; // db_result
+
+    /**
+     *
+     * Class: db_set
+     *  - returned by open()
+     *
+     */
+    function db_set() 
+    {
+        this.db_name;
+        this.db_dir;
+        this.db_path;
+
         var needs_write = 0;
         var master = [];
         var _id = 0;
 
+        return {
+            db_name: this.db_name,
+            db_dir: this.db_dir,
+            db_path: this.db_path,
 
-        // object parameters
-        this.db_name = 'test.db';
-        this.db_dir  = path.resolve(__dirname);
-        this.db_path = 0;
+            save: this.save,
+            insert: this.insert,
+            update: this.update,
+            find: this.find,
+            remove: this.remove,
+            get_json: this.get_json,
+            now: this.now,
+            count: this.count
+        };
+    }
 
+    db_set.prototype = {
 
+        //////////////////////////////////////////////////
         //
-        // methods
+        // public methods
         //
+        save: function() 
+        {
+            if ( platform === "node_module" ) {
+                var _mode = mode || 0666;
+                try {
+                    fs.writeFileSync( this.db_path, JSON.stringify(master), {encoding:"utf8",mode:_mode,flag:'w'} );
+                }
+                catch(e) {
+                    console.log( "error: failed to write: \""+this.db_path+'"' );
+                }
+            } else {
+                localStorage['buryat'] = JSON.stringify(master);
+            }
+        }, // this.save
 
-        var clip_all_leading = function(str, clip)
+        insert: function( Arg ) 
+        {
+            var id_set = -1;
+
+            function insert_one( obj )
+            {
+                if ( type_of( obj ) !== "object" ) {
+                    return -1;
+                }
+
+                if ( !obj["_id"] ) 
+                    obj["_id"] = ++_id;
+
+                master.push(obj);
+
+                return obj["_id"];
+            }
+
+
+            if ( type_of( Arg ) === "array" ) 
+            {
+                for ( var i = 0, l = Arg.length; i < l; i++ ) {
+                    id_set = insert_one( Arg[i] );
+                }
+            } else {
+                id_set = insert_one( Arg );
+            }
+
+            return id_set;
+        }, // this.insert
+
+
+        /**
+         *
+         * update
+         *
+            options:
+              upsert - If set to true, creates a new document when no document matches the query criteria. default is false
+              multi - If set to true, updates multiple documents that meet the query criteria. If set to false, updates one document. default is false.
+
+            returns the number of rows altered
+         */
+        update: function( query, update, options ) 
+        {
+            if ( arguments.length < 2 )
+                return 0;
+
+            if ( type_of(query) !== "object" ||
+                type_of(update) !== "object" )
+                return 0;
+
+            if ( arguments.length === 3 && type_of(options) !== "object" )
+                return 0;
+
+            var set = update['$set'];
+            if ( !set )
+                return 0;
+
+            // these are the rows we're updating
+            var res = do_query( query );
+
+            var do_multi = false, do_upsert = false;
+
+            if ( arguments.length === 3 ) {
+                do_multi = options['multi'] ? options['multi'] : false;
+                do_upsert = options['upsert'] ? options['upsert'] : false;
+            }
+
+            // chance to upsert
+            if ( res.length === 0 && do_upsert ) {
+                that.insert( set );
+                return 1;
+            }
+
+            var rows_altered = 0;
+
+            // foreach row of the matching result
+            for ( var i = 0, l = res.length; i < l; i++ ) {
+                var row = res[i];
+                // foreach key/value in $set, update a row
+                var did_change = false;
+                for ( j in set ) {
+                    if ( set.hasOwnProperty(j) ) {
+                        var key = j;
+                        var value = set[j];
+                        if ( !row[key] || row[key] !== value ) {
+                            row[key] = value;
+                            did_change = true;
+                        }
+                    }
+                }
+                if ( did_change )
+                    ++rows_altered;
+                if ( !do_multi ) 
+                    break; // do 1 row only 
+            }
+
+            return rows_altered;
+        }, // this.update
+
+
+        find: function( match ) 
+        {
+            var res = do_query( match );
+            var dbres = new db_result( res );
+            res = null;
+            return dbres;
+        }, // this.find
+
+
+        // returns number rows altered
+        remove: function( constraints ) 
+        {
+            if ( arguments.length === 0 )
+                var constraints = {};
+            if ( type_of(constraints) !== "object" )
+                return 0;
+
+            var rows_altered = 0;
+
+            // get the rows to remove
+            var rows = do_query( constraints );
+            if ( rows.length === 0 )
+                return 0; 
+        
+            var rmids = [];
+
+            // collect row _id's
+            for ( var i = 0, l = rows.length; i < l; i++ ) {
+                var id = rows[i]['_id']; 
+                if ( !id )
+                    continue;
+                rmids.push( id );
+            }
+
+            if ( rmids.length === 0 )
+                return 0;
+
+            var new_master = master.filter(function(row) {
+                for ( var i = 0, l = rmids.length; i < l; i++ ) {
+                    if ( row['_id'] && row['_id'] === rmids[i] ) {
+                        ++rows_altered;
+                        return false;
+                    } 
+                }    
+                return true;
+            });
+
+            if ( rows_altered > 0 )
+                master = new_master;
+            
+            return rows_altered;
+
+        }, // this.remove
+
+        get_json: function() {
+            return JSON.stringify( master );
+        }; // this.get_json
+    
+        now: function() 
+        {
+            var n = new Date();
+
+            if ( n.toISOString && typeof n.toISOString === "function" ) {
+                return n.toISOString();
+            }
+
+            return n.getFullYear() + '-' + 
+                    (n.getMonth()+1) + '-' + 
+                    n.getDate() + 'T' + 
+                    n.toUTCString().replace( /.*(\d\d:\d\d:\d\d).*/, "$1" ) + '.000Z';
+        }, // this.now
+
+        count: function() {
+            return master.length;
+        },
+
+        //////////////////////////////////////////////////
+        //
+        // private methods (not returned in constructor)
+        //
+        clip_all_leading: function(str, clip)
         {
             while ( str.length && str.charAt(0) === clip ) {
                 str = str.substring(clip.length,str.length);
             }
             return str;
-        };
+        },
 
-
-        function _firstKey( O )
+        _firstKey: function( O )
         {
             for ( i in O ) {
                 if ( O.hasOwnProperty(i) )
                     return i;
             }
             return null;
-        }
+        },
 
         // converts object {key1:val1,key2:val2,...} 
         // into array [{key:key1,value:val1},{key:key2,value:val2},...]
         // recurses, so: obj {key1:{key2:val2,key3:val3}} becomes:
         //  [{key:key1,value:[{key:key2,value:val2},{key:key3,value:val3}]}]
-        function _getKeys( O ) {
+        _getKeys: function( O ) {
             var keys = [];
             if ( type_of(O) !== "object" )
                 return null;
@@ -114,10 +413,10 @@
                 }
             }
             return keys;
-        }
+        },
 
         // takes an object and sorts it by its keys, alphabetically
-        function sortObjectByKeys( O )
+        sortObjectByKeys: function( O )
         {
             if ( typeof O !== "object" || (O instanceof Array) )
                 return O;
@@ -141,10 +440,10 @@
             });
 
             return nO;
-        }
+        },
 
         // sorts in place
-        function sortArrayOfObjectsByKeys( array_of_objs )
+        sortArrayOfObjectsByKeys: function( array_of_objs )
         {  
             if ( type_of(array_of_objs) !== "array" )
                 return array_of_objs;
@@ -163,10 +462,10 @@
             });
 
             return array_of_objs;
-        }
+        },
 
         // query matching functions
-        function detect_clause_type( key, value )
+        detect_clause_type: function( key, value )
         {
             switch ( type_of(value) )
             {
@@ -196,9 +495,9 @@
             }
             return "CLAUSE_UNKNOWN";
 
-        } // detect_clause_type
+        }, // detect_clause_type
 
-        function matching_rows_NORMAL( test, rows )
+        matching_rows_NORMAL: function( test, rows )
         {
             var res = [];
             var i = 0;
@@ -237,10 +536,9 @@
             } // each row
 
             return res;
-        } // matching_rows_NORMAL
+        }, // matching_rows_NORMAL
 
-
-        function matching_rows_CONDITIONAL( test, rows )
+        matching_rows_CONDITIONAL: function( test, rows )
         {
             var res = [];
             var i = 0;
@@ -311,10 +609,9 @@
                 delete test.value[cond];
 
             return res;
-        } // matching_rows_CONDITIONAL
+        }, // matching_rows_CONDITIONAL
 
-
-        function matching_rows_OR( array, rows )
+        matching_rows_OR: function( array, rows )
         {
             var res = [];
             var i = 0;
@@ -401,10 +698,9 @@
 //                }
             }
             return res;
-        } // matching_rows_OR
+        }, // matching_rows_OR
 
-
-        function do_query( clauses )
+        do_query: function( clauses )
         {
             var result = master;
 
@@ -441,299 +737,50 @@
             }
 
             return result;
-        } // do_query
+        }, // do_query
 
-
-        function sortMaster()
+        sortMaster: function ()
         {
             sortArrayOfObjectsByKeys( master );
         }
 
+    }; // db_set.prototype
 
-        // 
-        // Classes
-        // 
 
-        /**
-         *
-         * Class: dbresult
-         *
-         */
-        function dbresult( arg ) 
-        {
-            this.length = 0;
-            this._data = [];            
+    /**
+        - MAIN MODULE INTERFACE 
+        - opens physical database (new one is created if non-existent)
+        - returns handle to new db_object
+    */
+    buryat.open = function ( config ) 
+    {
 
-            // sort of a copy-constructor. If Array of Obj is passed in,
-            //  we clone it into _data 
-            if ( arguments.length === 1 && type_of(arg) === "array" ) 
-            {
-                for ( var i = 0, l = arg.length; i < l; i++ ) {
-                    this.push( arg[i] );
-                }
-            }
+        // private variables
+        var parm_list = ['db_name','db_dir','db_path'];
+        var data = 0;
+        var that = this;
+
+
+        // object parameters
+        var platform = detect_platform();
+
+        switch ( platform ) {
+        case "node_module":
+            var db_name = 'test.db';
+            var db_dir  = path.resolve(__dirname);
+            var db_path = 0;
+            var path        = require('path');
+            var fs          = require('fs');
+            break;
+        case "browser":
+            break;
+        default:
+            p( "unknown platform" );
+            return buryat;
+            break;
         }
-        dbresult.prototype = {
-            push: function( O ) {
-                if ( type_of(O) === "object" )
-                    this._data.push(JSON.parse(JSON.stringify(O)));
-                this.length = this._data.length;
-                return this;
-            },
-
-            /* 
-             SELECT * FROM users WHERE status = "A" ORDER BY user_id ASC
-               db.users.find( { status: "A" } ).sort( { user_id: 1 } )
-             SELECT * FROM users WHERE status = "A" ORDER BY user_id DESC
-               db.users.find( { status: "A" } ).sort( { user_id: -1 } ) 
-            */
-            sort: function( O ) {
-                var key = _firstKey(O);
-                var val = O[key];
-
-                this._data.sort(function(a,b) 
-                {
-                    if ( !a[key] )
-                        return -val;
-                    else if ( !b[key] )
-                        return val;
-                    if ( typeof a[key] === "string" && typeof b[key] === "string" )
-                        return a[key].localeCompare(b[key]) * val;
-                    else
-                        return a[key] > b[key] ? val : -val;
-                });
-
-                return this;
-            },
-
-            limit: function( _l ) {
-                var lim = Number(_l);
-                if ( type_of(lim) !== "number" )
-                    return this;
-                this._data.splice( lim, this._data.length - lim );
-                this.length = this._data.length;
-                return this;
-            },
-
-            skip: function( O ) {
-                return this;
-            },
-
-            distinct: function( O ) {
-                return this;
-            },
-
-            count: function() {
-                return this._data.length;
-            },
-
-            getArray: function() {
-                return this._data;
-            },
-            get_json: function(fmt) {
-                if ( arguments.length === 0 )
-                    return JSON.stringify(this._data);
-                return JSON.stringify(this._data,null,fmt);
-            }
-        };
 
 
-        //
-        // public methods
-        //
-
-        this.save = function() 
-        {
-            var _mode = mode || 0666;
-            try {
-                fs.writeFileSync( this.db_path, JSON.stringify(master), {encoding:"utf8",mode:_mode,flag:'w'} );
-            }
-            catch(e) {
-                console.log( "error: failed to write: \""+this.db_path+'"' );
-            }
-        }; // this.save
-
-
-        this.insert = function( Arg ) 
-        {
-            var id_set = -1;
-
-            function insert_one( obj )
-            {
-                if ( type_of( obj ) !== "object" ) {
-                    return -1;
-                }
-
-                if ( !obj["_id"] ) 
-                    obj["_id"] = ++_id;
-
-                master.push(obj);
-
-                return obj["_id"];
-            }
-
-
-            if ( type_of( Arg ) === "array" ) 
-            {
-                for ( var i = 0, l = Arg.length; i < l; i++ ) {
-                    id_set = insert_one( Arg[i] );
-                }
-            } else {
-                id_set = insert_one( Arg );
-            }
-
-            return id_set;
-        }; // this.insert
-
-
-        /**
-         *
-         * update
-         *
-            options:
-              upsert - If set to true, creates a new document when no document matches the query criteria. default is false
-              multi - If set to true, updates multiple documents that meet the query criteria. If set to false, updates one document. default is false.
-
-            returns the number of rows altered
-         */
-        this.update = function( query, update, options ) 
-        {
-            if ( arguments.length < 2 )
-                return 0;
-
-            if ( type_of(query) !== "object" ||
-                type_of(update) !== "object" )
-                return 0;
-
-            if ( arguments.length === 3 && type_of(options) !== "object" )
-                return 0;
-
-            var set = update['$set'];
-            if ( !set )
-                return 0;
-
-            // these are the rows we're updating
-            var res = do_query( query );
-
-            var do_multi = false, do_upsert = false;
-
-            if ( arguments.length === 3 ) {
-                do_multi = options['multi'] ? options['multi'] : false;
-                do_upsert = options['upsert'] ? options['upsert'] : false;
-            }
-
-            // chance to upsert
-            if ( res.length === 0 && do_upsert ) {
-                that.insert( set );
-                return 1;
-            }
-
-            var rows_altered = 0;
-
-            // foreach row of the matching result
-            for ( var i = 0, l = res.length; i < l; i++ ) {
-                var row = res[i];
-                // foreach key/value in $set, update a row
-                var did_change = false;
-                for ( j in set ) {
-                    if ( set.hasOwnProperty(j) ) {
-                        var key = j;
-                        var value = set[j];
-                        if ( !row[key] || row[key] !== value ) {
-                            row[key] = value;
-                            did_change = true;
-                        }
-                    }
-                }
-                if ( did_change )
-                    ++rows_altered;
-                if ( !do_multi ) 
-                    break; // do 1 row only 
-            }
-
-            return rows_altered;
-        }; // this.update
-
-
-        this.find = function( match ) 
-        {
-            var res = do_query( match );
-            var dbres = new dbresult( res );
-            res = null;
-            return dbres;
-        }; // this.find
-
-
-        // returns number rows altered
-        this.remove = function( constraints ) 
-        {
-            if ( arguments.length === 0 )
-                var constraints = {};
-            if ( type_of(constraints) !== "object" )
-                return 0;
-
-            var rows_altered = 0;
-
-            // get the rows to remove
-            var rows = do_query( constraints );
-            if ( rows.length === 0 )
-                return 0; 
-        
-            var rmids = [];
-
-            // collect row _id's
-            for ( var i = 0, l = rows.length; i < l; i++ ) {
-                var id = rows[i]['_id']; 
-                if ( !id )
-                    continue;
-                rmids.push( id );
-            }
-
-            if ( rmids.length === 0 )
-                return 0;
-
-            var new_master = master.filter(function(row) {
-                for ( var i = 0, l = rmids.length; i < l; i++ ) {
-                    if ( row['_id'] && row['_id'] === rmids[i] ) {
-                        ++rows_altered;
-                        return false;
-                    } 
-                }    
-                return true;
-            });
-
-            if ( rows_altered > 0 )
-                master = new_master;
-            
-            return rows_altered;
-
-        }; // this.remove
-
-
-
-        this.get_json = function() {
-            return JSON.stringify( master );
-        }; // this.get_json
-
-    
-        this.now = function() 
-        {
-            var n = new Date();
-
-            if ( n.toISOString && typeof n.toISOString === "function" ) {
-                return n.toISOString();
-            }
-
-            return n.getFullYear() + '-' + 
-                    (n.getMonth()+1) + '-' + 
-                    n.getDate() + 'T' + 
-                    n.toUTCString().replace( /.*(\d\d:\d\d:\d\d).*/, "$1" ) + '.000Z';
-        }; // this.now
-
-
-        this.count = function() {
-            return master.length;
-        };
 
 
 
@@ -869,30 +916,9 @@
             needs_write = 1;
         }
 
+    }; // buryat.open
 
-        return {
-            db_name: this.db_name,
-            db_dir: this.db_dir,
-            db_path: this.db_path,
+    return buryat;
 
-            save: this.save,
-            insert: this.insert,
-            update: this.update,
-            find: this.find,
-            remove: this.remove,
-            get_json: this.get_json,
-            now: this.now,
-            count: this.count
-        };
-
-    }; // open
-
-
-//    open.prototype = {
-//    };
-
-
-    module.exports.open = open;
-
-})();
+})(typeof exports === "undefined" ? {} : exports);
 
