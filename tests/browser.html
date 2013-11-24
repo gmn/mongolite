@@ -1,21 +1,26 @@
 <!doctype html>
 <html><head>
-<!-- <script type="text/javascript" src="../buryat.js"></script> -->
 <script src="../buryat.js"></script>
 </head>
 
 <body>
 
+<button id="clear_btn" >Clear Cache</button>
 <div id="inforows"></div>
-
 <input id="db_ins_txt" type="text"></input>
 <button id="db_ins_btn" >Press Me</button>
 
 
 <script>
+var db = buryat.open("ThisPage"); 
+
+document.getElementById('clear_btn').onclick = function() {
+    db.remove();
+    draw_rows();
+};
 document.getElementById('db_ins_btn').onclick = function() {
     var t = document.getElementById('db_ins_txt');
-    db.insert( {text:t.value} );
+    db.insert( {text:t.value,time:db.now()} );
     t.value = "";
     draw_rows();
 };
@@ -26,12 +31,9 @@ document.body.onkeydown = function(e) {
     }
 };
 
-var db = buryat.open(); // TODO: be able to supply a key-name here, defaults to buryat
-//db.insert( [{text:"I"},{text:"Love"},{text:"You"},{text:"Ivette"}] );
-
 function rows_render()
 {
-    var res = db.find(/.*/); // all rows
+    var res = db.find(/.*/).sort( {time:1} ); // all rows
     var inforows = document.getElementById('inforows');
 
     do {
@@ -46,7 +48,6 @@ function rows_render()
         e.innerHTML = val.text;
         inforows.appendChild(e);
     });
-
 }
 
 function draw_rows() {
@@ -57,7 +58,6 @@ function draw_rows() {
 draw_rows();
 
 </script>
-
 
 </body>
 </html>

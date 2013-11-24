@@ -254,8 +254,11 @@
         //
         if ( this.platform === "browser" )
         {
-            if ( window.localStorage && localStorage.hasOwnProperty('buryat') ) {
-                var string = localStorage['buryat'];
+            var name = this.db_name.trim();
+            this.db_name = ( !name || name.length===0 || name === "test.db" ) ? 'buryat' : name;
+
+            if ( window.localStorage && localStorage.hasOwnProperty( this.db_name ) ) {
+                var string = localStorage[this.db_name];
                 this.master = JSON.parse( string );
             }
         }
@@ -336,7 +339,7 @@
                     console.log( "buryat: error: failed to write: \""+this.db_path+'"' );
                 }
             } else if ( this.platform === "browser" ) {
-                localStorage['buryat'] = JSON.stringify(this.master);
+                localStorage[this.db_name] = JSON.stringify(this.master);
             }
         }, // this.save
 
@@ -813,7 +816,13 @@
             this.db_path    = 0;
             return server_open( config );
         case "browser":
-            return new db_set( {"platform":"browser"} );
+            var _name = '';
+            if ( type_of(config) === "string" )
+                _name = config;
+            else 
+                _name = ( config && config.db_name ) ? config.db_name : '';
+
+            return new db_set( {"platform":"browser",db_name:_name} );
         default:
             p( "unknown platform" );
             return buryat;
@@ -904,7 +913,8 @@
             }
 
             return new db_set( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform} );
-        }
+        } // server_open()
+
     }; // buryat.open
 
     try {
