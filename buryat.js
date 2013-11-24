@@ -1,8 +1,8 @@
 /**
 
-    buryat.js   A tiny, self-contained, single-file database that aims to support a useful
+    buryat.js   A tiny, self-contained, single file database that aims to support a useful
                 subset of MongoDB commands.  Its per-DB storage is a single JSON string, which can be 
-                stored anywhere: in the file-system of the server, or localStorage in the browser.
+                stored anywhere: in the server's file-system, or localStorage in the browser.
                 See buryat.org for more details and documentation, https://github.com/gmn/buryat
                 for new releases and code.
   
