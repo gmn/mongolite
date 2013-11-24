@@ -10,6 +10,8 @@
 
 (function(buryat) 
 {
+    'use strict';
+
     //////////////////////////////////////////////////
     //
     // utility functions, internal
@@ -60,7 +62,7 @@
 
     function _firstKey( O )
     {
-        for ( i in O ) {
+        for ( var i in O ) {
             if ( O.hasOwnProperty(i) )
                 return i;
         }
@@ -76,7 +78,7 @@
         var keys = [];
         if ( type_of(O) !== "object" )
             return null;
-        for ( i in O ) 
+        for ( var i in O ) 
         {
             if ( O.hasOwnProperty(i) ) 
             {
@@ -100,7 +102,7 @@
 
         var keys = [];
 
-        for ( i in O ) {
+        for ( var i in O ) {
             if ( O.hasOwnProperty(i) ) {
                 keys.push( {key:i,value:O[i]} );
             }
@@ -241,23 +243,37 @@
     function db_set( config ) 
     {
         this.platform = config.platform;
-        this.db_name = config.db_name;
-        this.db_dir = config.db_dir;
         this.db_path = config.db_path;
-
+        this.db_dir = config.db_dir;
+        this.db_name = config.db_name;
         this.master = [];
         this._id = 0;
 
         //
         // read in db if it's there
         //
-        if ( fs.existsSync( this.db_path ) ) 
+        if ( this.platform === "browser" )
         {
-            var data = fs.readFileSync(this.db_path,{encoding:"utf8"});
+            if ( window.localStorage && localStorage.hasOwnProperty('buryat') ) {
+                var string = localStorage['buryat'];
+                this.master = JSON.parse( string );
+            }
+        }
+        else if ( this.platform === "node_module" )
+        {
+            var fs = require('fs');
+            if ( fs.existsSync( this.db_path ) ) 
+            {
+                var data = fs.readFileSync(this.db_path,{encoding:"utf8",flag:'r'});
 
-            // convert into master format
-            this.master = JSON.parse( data );
+                // convert into master format
+                this.master = JSON.parse( data );
+            }
+        }
 
+
+        if ( this.master.length > 0 ) 
+        {
             // next _id is 1 greater than highest _id
             var highest = 0;
             var any_missing = false;
@@ -283,8 +299,9 @@
             // sort in place ?
             // - sort each object
             // - sort array by leading keys
-        } 
+        }
 
+        /* 
         return {
             db_name: this.db_name,
             db_dir: this.db_dir,
@@ -298,7 +315,7 @@
             get_json: this.get_json,
             now: this.now,
             count: this.count
-        };
+        }; */
     }
 
     db_set.prototype = {
@@ -310,14 +327,15 @@
         save: function(_mode) 
         {
             if ( this.platform === "node_module" ) {
-                var mode = _mode || 0666;
+                var mode = _mode || 438; // 0666;
                 try {
+                    var fs = require('fs');
                     fs.writeFileSync( this.db_path, JSON.stringify(this.master), {encoding:"utf8",mode:mode,flag:'w'} );
                 }
                 catch(e) {
                     console.log( "buryat: error: failed to write: \""+this.db_path+'"' );
                 }
-            } else {
+            } else if ( this.platform === "browser" ) {
                 localStorage['buryat'] = JSON.stringify(this.master);
             }
         }, // this.save
@@ -326,6 +344,7 @@
         insert: function( Arg ) 
         {
             var id_set = -1;
+            var that = this;
 
             function insert_one( obj )
             {
@@ -334,9 +353,9 @@
                 }
 
                 if ( !obj["_id"] ) 
-                    obj["_id"] = ++_id;
+                    obj["_id"] = ++that._id;
 
-                this.master.push(obj);
+                that.master.push(obj);
 
                 return obj["_id"];
             }
@@ -403,7 +422,7 @@
                 var row = res[i];
                 // foreach key/value in $set, update a row
                 var did_change = false;
-                for ( j in set ) {
+                for ( var j in set ) {
                     if ( set.hasOwnProperty(j) ) {
                         var key = j;
                         var value = set[j];
@@ -547,7 +566,7 @@
                 var row = rows[i];
 
                 // for each unique key in the row
-                for ( key in row )
+                for ( var key in row )
                 {
                     // matches our query key
                     if ( row.hasOwnProperty(key) && key === test.key ) 
@@ -603,7 +622,7 @@
                 }
 
                 // for every unique key in row
-                for ( key in row )
+                for ( var key in row )
                 {
                     // key matches
                     if ( row.hasOwnProperty(key) && key === test.key ) 
@@ -736,7 +755,7 @@
 
             // 
         next_clause:
-            for ( clause in clauses ) 
+            for ( var clause in clauses ) 
             { 
                 if ( ! clauses.hasOwnProperty(clause) )
                     continue next_clause;
@@ -777,134 +796,122 @@
         - opens physical database (new one is created if non-existent)
         - returns handle to new db_object
     */
-    buryat.open = function ( config ) 
+    buryat.open = function ( config )
     {
-
         // private variables
-        var parm_list = ['db_name','db_dir','db_path'];
-        var data = 0;
         var that = this;
 
-
         // object parameters
-        var platform = detect_platform();
+        this.platform = detect_platform();
 
-        switch ( platform ) {
+        switch ( this.platform ) {
         case "node_module":
-            var db_name = 'test.db';
-            var db_dir  = path.resolve(__dirname);
-            var db_path = 0;
             var path        = require('path');
             var fs          = require('fs');
-            break;
+            this.db_name    = 'test.db';
+            this.db_dir     = path.resolve(__dirname);
+            this.db_path    = 0;
+            return server_open( config );
         case "browser":
-            break;
+            return new db_set( {"platform":"browser"} );
         default:
             p( "unknown platform" );
             return buryat;
-            break;
         }
 
-
-        // 1) parse config, 2) set paths, 3) new db_set() & set paths in it, 4) return it
-
-
-
-        //
-        // ENTRY - set paths from constructor args
-        //
-
-        // assume it is either (in this order): path, fullpath, filename
-        if ( arguments.length > 0 && typeof config === "string" ) 
+        function server_open( config )
         {
-            try {
-                // is file 
-                data = fs.readFileSync(config,{encoding:"utf8"}); // throws if Directory or File doesn't exist
+            var parm_list = ['db_name','db_dir','db_path'];
 
-                // fullpath
-                this.db_path = path.resolve(config);
-                // name
-                this.db_name = clip_all_leading( this.db_path.substring( this.db_path.lastIndexOf('/'), this.db_path.length ), '/' );
-                // dir
-                this.db_dir = this.db_path.substring(0, this.db_path.lastIndexOf( this.db_name ));
-
-            } 
-            catch(e) 
+            // assume it is either (in this order): path, fullpath, filename
+            if ( arguments.length > 0 && typeof config === "string" ) 
             {
-                switch ( e.code ) 
+                try {
+                    // is file 
+                    var data = fs.readFileSync(config,{encoding:"utf8",flag:'r'}); // throws if Directory or File doesn't exist
+
+                    // fullpath
+                    that.db_path = path.resolve(config);
+                    // name
+                    that.db_name = clip_all_leading( that.db_path.substring( that.db_path.lastIndexOf('/'), that.db_path.length ), '/' );
+                    // dir
+                    that.db_dir = that.db_path.substring(0, that.db_path.lastIndexOf( that.db_name ));
+
+                } 
+                catch(e) 
                 {
-                case "ENOENT":
-                    // file not exists: get db_name, db_dir
-                    this.db_path = path.resolve(config); 
-                    this.db_name = clip_all_leading( this.db_path.substring( this.db_path.lastIndexOf('/'), this.db_path.length ), '/' );
-                    this.db_dir = this.db_path.substring(0, this.db_path.lastIndexOf( this.db_name ));
-                    break;
-                case "EISDIR":
-                    // is a directory: get db_dir
-                    this.db_dir = path.resolve(config);
-                    break;
-                default:
-                    // who knows
-                    break;
-                }
-            }
-        }
-
-        // overwrite from user-supplied config settings
-        else if ( arguments.length > 0 && typeof config === "object" ) 
-        {
-            for ( var i = 0; i < parm_list.length; i++ ) 
-            {
-                if ( config[parm_list[i]] ) {
-                    if ( parm_list[i] === "db_path" ) {
-                        config[parm_list[i]] = path.resolve( config[parm_list[i]] );
+                    switch ( e.code ) 
+                    {
+                    case "ENOENT":
+                        // file not exists: get db_name, db_dir
+                        that.db_path = path.resolve(config); 
+                        that.db_name = clip_all_leading( that.db_path.substring( that.db_path.lastIndexOf('/'), that.db_path.length ), '/' );
+                        that.db_dir = that.db_path.substring(0, that.db_path.lastIndexOf( that.db_name ));
+                        break;
+                    case "EISDIR":
+                        // is a directory: get db_dir
+                        that.db_dir = path.resolve(config);
+                        break;
+                    default:
+                        // who knows
+                        break;
                     }
-                    else if ( parm_list[i] === "db_dir" )
-                        config[parm_list[i]] = path.resolve( config[parm_list[i]] );
-                    else if ( parm_list[i] === 'db_name' )
-                        config[parm_list[i]] = clip_all_leading( config[parm_list[i]], '/' );
-                    this[parm_list[i]] = config[parm_list[i]];
                 }
             }
 
-            // if db_path supplied, check that db_name and db_dir match, or else db_name and db_dir override, and path must be reset
-            if ( config.db_path ) {
-                var _n = clip_all_leading( this.db_path.substring( this.db_path.lastIndexOf('/'), this.db_path.length ), '/' );
-                var _d = this.db_path.substring(0, this.db_path.lastIndexOf( _n ));
-                var _any_changed = 0;
-                if ( _n !== this.db_name ) {
-                    this.db_name = _n;
-                    ++_any_changed;
+            // overwrite from user-supplied config settings
+            else if ( arguments.length > 0 && typeof config === "object" ) 
+            {
+                for ( var i = 0; i < parm_list.length; i++ ) 
+                {
+                    if ( config[parm_list[i]] ) {
+                        if ( parm_list[i] === "db_path" ) {
+                            config[parm_list[i]] = path.resolve( config[parm_list[i]] );
+                        }
+                        else if ( parm_list[i] === "db_dir" )
+                            config[parm_list[i]] = path.resolve( config[parm_list[i]] );
+                        else if ( parm_list[i] === 'db_name' )
+                            config[parm_list[i]] = clip_all_leading( config[parm_list[i]], '/' );
+                        that[parm_list[i]] = config[parm_list[i]];
+                    }
                 }
-                if ( _d !== this.db_dir ) {
-                    this.db_dir = _d;
-                    ++_any_changed;
-                }
-                if ( _any_changed ) {
-                    this.db_path = 0; 
+
+                // if db_path supplied, check that db_name and db_dir match, or else db_name and db_dir override, and path must be reset
+                if ( config.db_path ) {
+                    var _n = clip_all_leading( that.db_path.substring( that.db_path.lastIndexOf('/'), that.db_path.length ), '/' );
+                    var _d = that.db_path.substring(0, that.db_path.lastIndexOf( _n ));
+                    var _any_changed = 0;
+                    if ( _n !== that.db_name ) {
+                        that.db_name = _n;
+                        ++_any_changed;
+                    }
+                    if ( _d !== that.db_dir ) {
+                        that.db_dir = _d;
+                        ++_any_changed;
+                    }
+                    if ( _any_changed ) {
+                        that.db_path = 0; 
+                    }
                 }
             }
+
+            // set db_path, if we didn't get it yet
+            if ( ! that.db_path ) {
+                if ( that.db_dir && that.db_dir[that.db_dir.length-1] === '/' )
+                    that.db_path = that.db_dir + that.db_name;
+                else
+                    that.db_path = that.db_dir + '/' + that.db_name;
+            }
+
+            return new db_set( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform} );
         }
-
-
-        // set db_path
-        var _set_db_path = function() {
-            if ( that.db_path ) 
-                return that.db_path;
-            if ( that.db_dir && that.db_dir[that.db_dir.length-1] === '/' )
-                that.db_path = that.db_dir + that.db_name;
-            else
-                that.db_path = that.db_dir + '/' + that.db_name;
-            return that.db_path;
-        }
-
-        _set_db_path();
-
-
-// FIXME: goes in db_set
-
-
     }; // buryat.open
+
+    try {
+        if ( window )
+            window.buryat = buryat;
+    } catch(e) {
+    }
 
     return buryat;
 
