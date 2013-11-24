@@ -50,6 +50,96 @@
         return platform;
     }
 
+    function clip_all_leading(str, clip)
+    {
+        while ( str.length && str.charAt(0) === clip ) {
+            str = str.substring(clip.length,str.length);
+        }
+        return str;
+    }
+
+    function _firstKey( O )
+    {
+        for ( i in O ) {
+            if ( O.hasOwnProperty(i) )
+                return i;
+        }
+        return null;
+    }
+
+    // converts object {key1:val1,key2:val2,...} 
+    // into array [{key:key1,value:val1},{key:key2,value:val2},...]
+    // recurses, so: obj {key1:{key2:val2,key3:val3}} becomes:
+    //  [{key:key1,value:[{key:key2,value:val2},{key:key3,value:val3}]}]
+    function _getKeys( O ) 
+    {
+        var keys = [];
+        if ( type_of(O) !== "object" )
+            return null;
+        for ( i in O ) 
+        {
+            if ( O.hasOwnProperty(i) ) 
+            {
+                var _val = type_of(O[i]) === "object" ? 
+                        _getKeys(O[i]) : O[i];
+
+                if ( type_of(_val) === "array" && _val.length === 1 )
+                    _val = _val[0]; // ditch the array if only 1 elt
+                    
+                keys.push( {key:i,value:_val} );
+            }
+        }
+        return keys;
+    }
+
+    // takes an object and sorts it by its keys, alphabetically
+    function sortObjectByKeys( O )
+    {
+        if ( typeof O !== "object" || (O instanceof Array) )
+            return O;
+
+        var keys = [];
+
+        for ( i in O ) {
+            if ( O.hasOwnProperty(i) ) {
+                keys.push( {key:i,value:O[i]} );
+            }
+        }
+        if ( keys.length === 0 )
+            return O;
+
+        keys.sort( function(a,b) { return a.key < b.key ? -1 : 1; } );
+
+        var nO = {};
+
+        keys.forEach( function(item) {
+            nO[item.key] = item.value;
+        });
+
+        return nO;
+    }
+
+        // sorts in place
+    function sortArrayOfObjectsByKeys( array_of_objs )
+    {
+        if ( type_of(array_of_objs) !== "array" )
+            return array_of_objs;
+
+        if ( array_of_objs.length === 0 )
+            return array_of_objs;
+
+        // sort each key
+        array_of_objs.forEach(function(val,index,ary) {
+            ary[index] = sortObjectByKeys(val);
+        });
+
+        // sort entire array by firstKey
+        array_of_objs.sort(function(a,b){
+            return _firstKey(a) < _firstKey(b) ? -1 : 1;
+        });
+
+        return array_of_objs;
+    }
 
     //////////////////////////////////////////////////
     // 
@@ -140,21 +230,60 @@
         }
     }; // db_result
 
+
     /**
      *
      * Class: db_set
      *  - returned by open()
+     *  - contains entire database w/ accessor methods
      *
      */
-    function db_set() 
+    function db_set( config ) 
     {
-        this.db_name;
-        this.db_dir;
-        this.db_path;
+        this.platform = config.platform;
+        this.db_name = config.db_name;
+        this.db_dir = config.db_dir;
+        this.db_path = config.db_path;
 
-        var needs_write = 0;
-        var master = [];
-        var _id = 0;
+        this.master = [];
+        this._id = 0;
+
+        //
+        // read in db if it's there
+        //
+        if ( fs.existsSync( this.db_path ) ) 
+        {
+            var data = fs.readFileSync(this.db_path,{encoding:"utf8"});
+
+            // convert into master format
+            this.master = JSON.parse( data );
+
+            // next _id is 1 greater than highest _id
+            var highest = 0;
+            var any_missing = false;
+            this.master.forEach(function(row) {
+                if ( ! row['_id'] )
+                    any_missing = true;
+                else if ( row['_id'] > highest ) {
+                    highest = row['_id'];
+                }
+            });
+
+            // rows w/o _id need to have one added 
+            if ( any_missing ) {
+                this.master.forEach(function(r) {
+                    if ( !r['_id'] ) {
+                        r['_id'] = ++highest;
+                    }
+                });
+            }
+        
+            this._id = highest;
+            
+            // sort in place ?
+            // - sort each object
+            // - sort array by leading keys
+        } 
 
         return {
             db_name: this.db_name,
@@ -178,21 +307,22 @@
         //
         // public methods
         //
-        save: function() 
+        save: function(_mode) 
         {
-            if ( platform === "node_module" ) {
-                var _mode = mode || 0666;
+            if ( this.platform === "node_module" ) {
+                var mode = _mode || 0666;
                 try {
-                    fs.writeFileSync( this.db_path, JSON.stringify(master), {encoding:"utf8",mode:_mode,flag:'w'} );
+                    fs.writeFileSync( this.db_path, JSON.stringify(this.master), {encoding:"utf8",mode:mode,flag:'w'} );
                 }
                 catch(e) {
-                    console.log( "error: failed to write: \""+this.db_path+'"' );
+                    console.log( "buryat: error: failed to write: \""+this.db_path+'"' );
                 }
             } else {
-                localStorage['buryat'] = JSON.stringify(master);
+                localStorage['buryat'] = JSON.stringify(this.master);
             }
         }, // this.save
 
+        // returns last _id insert
         insert: function( Arg ) 
         {
             var id_set = -1;
@@ -206,7 +336,7 @@
                 if ( !obj["_id"] ) 
                     obj["_id"] = ++_id;
 
-                master.push(obj);
+                this.master.push(obj);
 
                 return obj["_id"];
             }
@@ -224,7 +354,6 @@
             return id_set;
         }, // this.insert
 
-
         /**
          *
          * update
@@ -235,24 +364,24 @@
 
             returns the number of rows altered
          */
-        update: function( query, update, options ) 
+        update: function( query, _update, options ) 
         {
             if ( arguments.length < 2 )
                 return 0;
 
             if ( type_of(query) !== "object" ||
-                type_of(update) !== "object" )
+                type_of(_update) !== "object" )
                 return 0;
 
             if ( arguments.length === 3 && type_of(options) !== "object" )
                 return 0;
 
-            var set = update['$set'];
+            var set = _update['$set'];
             if ( !set )
                 return 0;
 
             // these are the rows we're updating
-            var res = do_query( query );
+            var res = this.do_query( query );
 
             var do_multi = false, do_upsert = false;
 
@@ -263,7 +392,7 @@
 
             // chance to upsert
             if ( res.length === 0 && do_upsert ) {
-                that.insert( set );
+                this.insert( set );
                 return 1;
             }
 
@@ -293,15 +422,13 @@
             return rows_altered;
         }, // this.update
 
-
         find: function( match ) 
         {
-            var res = do_query( match );
+            var res = this.do_query( match );
             var dbres = new db_result( res );
             res = null;
             return dbres;
         }, // this.find
-
 
         // returns number rows altered
         remove: function( constraints ) 
@@ -314,7 +441,7 @@
             var rows_altered = 0;
 
             // get the rows to remove
-            var rows = do_query( constraints );
+            var rows = this.do_query( constraints );
             if ( rows.length === 0 )
                 return 0; 
         
@@ -331,7 +458,7 @@
             if ( rmids.length === 0 )
                 return 0;
 
-            var new_master = master.filter(function(row) {
+            var new_master = this.master.filter(function(row) {
                 for ( var i = 0, l = rmids.length; i < l; i++ ) {
                     if ( row['_id'] && row['_id'] === rmids[i] ) {
                         ++rows_altered;
@@ -342,15 +469,15 @@
             });
 
             if ( rows_altered > 0 )
-                master = new_master;
+                this.master = new_master;
             
             return rows_altered;
 
         }, // this.remove
 
         get_json: function() {
-            return JSON.stringify( master );
-        }; // this.get_json
+            return JSON.stringify( this.master );
+        }, // this.get_json
     
         now: function() 
         {
@@ -367,102 +494,13 @@
         }, // this.now
 
         count: function() {
-            return master.length;
+            return this.master.length;
         },
 
         //////////////////////////////////////////////////
         //
         // private methods (not returned in constructor)
         //
-        clip_all_leading: function(str, clip)
-        {
-            while ( str.length && str.charAt(0) === clip ) {
-                str = str.substring(clip.length,str.length);
-            }
-            return str;
-        },
-
-        _firstKey: function( O )
-        {
-            for ( i in O ) {
-                if ( O.hasOwnProperty(i) )
-                    return i;
-            }
-            return null;
-        },
-
-        // converts object {key1:val1,key2:val2,...} 
-        // into array [{key:key1,value:val1},{key:key2,value:val2},...]
-        // recurses, so: obj {key1:{key2:val2,key3:val3}} becomes:
-        //  [{key:key1,value:[{key:key2,value:val2},{key:key3,value:val3}]}]
-        _getKeys: function( O ) {
-            var keys = [];
-            if ( type_of(O) !== "object" )
-                return null;
-            for ( i in O ) 
-            {
-                if ( O.hasOwnProperty(i) ) 
-                {
-                    var _val = type_of(O[i]) === "object" ? 
-                            _getKeys(O[i]) : O[i];
-
-                    if ( type_of(_val) === "array" && _val.length === 1 )
-                        _val = _val[0]; // ditch the array if only 1 elt
-                        
-                    keys.push( {key:i,value:_val} );
-                }
-            }
-            return keys;
-        },
-
-        // takes an object and sorts it by its keys, alphabetically
-        sortObjectByKeys: function( O )
-        {
-            if ( typeof O !== "object" || (O instanceof Array) )
-                return O;
-
-            var keys = [];
-
-            for ( i in O ) {
-                if ( O.hasOwnProperty(i) ) {
-                    keys.push( {key:i,value:O[i]} );
-                }
-            }
-            if ( keys.length === 0 )
-                return O;
-
-            keys.sort( function(a,b) { return a.key < b.key ? -1 : 1; } );
-
-            var nO = {};
-
-            keys.forEach( function(item) {
-                nO[item.key] = item.value;
-            });
-
-            return nO;
-        },
-
-        // sorts in place
-        sortArrayOfObjectsByKeys: function( array_of_objs )
-        {  
-            if ( type_of(array_of_objs) !== "array" )
-                return array_of_objs;
-
-            if ( array_of_objs.length === 0 )
-                return array_of_objs;
-
-            // sort each key
-            array_of_objs.forEach(function(val,index,ary) {
-                ary[index] = sortObjectByKeys(val);
-            });
-
-            // sort entire array by firstKey
-            array_of_objs.sort(function(a,b){
-                return _firstKey(a) < _firstKey(b) ? -1 : 1;
-            });
-
-            return array_of_objs;
-        },
 
         // query matching functions
         detect_clause_type: function( key, value )
@@ -495,7 +533,7 @@
             }
             return "CLAUSE_UNKNOWN";
 
-        }, // detect_clause_type
+        }, // this.detect_clause_type
 
         matching_rows_NORMAL: function( test, rows )
         {
@@ -511,7 +549,6 @@
                 // for each unique key in the row
                 for ( key in row )
                 {
-
                     // matches our query key
                     if ( row.hasOwnProperty(key) && key === test.key ) 
                     {
@@ -571,7 +608,6 @@
                     // key matches
                     if ( row.hasOwnProperty(key) && key === test.key ) 
                     {
-
                         switch ( cond ) {
                         case '$lt':
                             if ( row[key] < test.value[cond] ) {
@@ -620,89 +656,78 @@
             {
                 var row = rows[i];
 
-//        next_key:
-//                for ( key in row )
-//                {
-//                    if ( !row.hasOwnProperty(key) )
-//                        continue next_key;
+                for ( var j = 0, la = array.length; j < la; j++ ) 
+                {
+                    var eltkey = _firstKey( array[j] );
+                    var eltval = array[j][eltkey];
+                    var test = { key:eltkey, value:eltval };
 
-                    for ( var j = 0, la = array.length; j < la; j++ ) 
+                    var clausetype = this.detect_clause_type( eltkey, eltval );
+
+                    switch ( clausetype )
                     {
-                        var eltkey = _firstKey( array[j] );
-                        var eltval = array[j][eltkey];
-                        var test = { key:eltkey, value:eltval };
-
-//                        if ( eltkey !== key )
-//                            continue next_key;  // couldn't you just check argument keys against the row, instead
-                                                // of going through all of them?
-
-                        var clausetype = detect_clause_type( eltkey, eltval );
-
-                        switch ( clausetype )
-                        {
-                        case "CLAUSE_NORMAL":
-                            if ( type_of( test.value ) === "regexp" ) {
-                                if ( row[test.key].match( test.value ) ) {
-                                    res.push( row );
-                                    continue next_row;
-                                }
-                            } else {
-                                if ( row[test.key] === test.value ) {
-                                    res.push( row );
-                                    continue next_row;
-                                }
+                    case "CLAUSE_NORMAL":
+                        if ( type_of( test.value ) === "regexp" ) {
+                            if ( row[test.key].match( test.value ) ) {
+                                res.push( row );
+                                continue next_row;
                             }
-                            break;
-                        case "CLAUSE_CONDITIONAL":
-                            switch( _firstKey(test.value) ) {
-                            case '$gt':
-                                if ( row[test.key] > test.value['$gt'] ) {
-                                    res.push(row);
-                                    continue next_row;
-                                }
-                                break;
-                            case '$gte':
-                                if ( row[test.key] >= test.value['$gte'] ) {
-                                    res.push(row);
-                                    continue next_row;
-                                }
-                                break;
-                            case '$lt':
-                                if ( row[test.key] < test.value['$lt'] ) {
-                                    res.push(row);
-                                    continue next_row;
-                                }
-                                break;
-                            case '$lte':
-                                if ( row[test.key] <= test.value['$lte'] ) {
-                                    res.push(row);
-                                    continue next_row;
-                                }
-                                break;
-                            case '$exists':
-                                if ( row[test.key] !== undefined && test.value['$exists'] ) {
-                                    res.push(row);
-                                    continue next_row;
-                                } else if ( row[test.key] === undefined && !test.value['$exists'] ) {
-                                    res.push(row);
-                                    continue next_row;
-                                }
-                                break;
+                        } else {
+                            if ( row[test.key] === test.value ) {
+                                res.push( row );
+                                continue next_row;
                             }
-                            break;
-                        default:
-                            break;
-                            //p( "NOT HANDLING CLAUSE TYPE: \"" + clausetype + '"' );
                         }
+                        break;
+                    case "CLAUSE_CONDITIONAL":
+                        switch( _firstKey(test.value) ) {
+                        case '$gt':
+                            if ( row[test.key] > test.value['$gt'] ) {
+                                res.push(row);
+                                continue next_row;
+                            }
+                            break;
+                        case '$gte':
+                            if ( row[test.key] >= test.value['$gte'] ) {
+                                res.push(row);
+                                continue next_row;
+                            }
+                            break;
+                        case '$lt':
+                            if ( row[test.key] < test.value['$lt'] ) {
+                                res.push(row);
+                                continue next_row;
+                            }
+                            break;
+                        case '$lte':
+                            if ( row[test.key] <= test.value['$lte'] ) {
+                                res.push(row);
+                                continue next_row;
+                            }
+                            break;
+                        case '$exists':
+                            if ( row[test.key] !== undefined && test.value['$exists'] ) {
+                                res.push(row);
+                                continue next_row;
+                            } else if ( row[test.key] === undefined && !test.value['$exists'] ) {
+                                res.push(row);
+                                continue next_row;
+                            }
+                            break;
+                        }
+                        break;
+                    default:
+                        break;
+                        //p( "NOT HANDLING CLAUSE TYPE: \"" + clausetype + '"' );
                     }
-//                }
+                }
             }
             return res;
         }, // matching_rows_OR
 
         do_query: function( clauses )
         {
-            var result = master;
+            var result = this.master;
 
             // CLAUSE_EMPTY
             if ( !clauses || (type_of(clauses)==="object" && _firstKey(clauses)===null) ) {
@@ -716,19 +741,19 @@
                 if ( ! clauses.hasOwnProperty(clause) )
                     continue next_clause;
 
-                var clausetype = detect_clause_type(clause,clauses[clause]);
+                var clausetype = this.detect_clause_type(clause,clauses[clause]);
                 switch ( clausetype )
                 {
                 case "CLAUSE_NORMAL": // simple key/value 
-                    result = matching_rows_NORMAL( { key: clause, value: clauses[clause] }, result );
+                    result = this.matching_rows_NORMAL( { key: clause, value: clauses[clause] }, result );
                     break;
                 case "CLAUSE_CONDITIONAL":
                     while ( _firstKey(clauses[clause]) !== null ) {
-                        result = matching_rows_CONDITIONAL( { key: clause, value: clauses[clause] }, result );
+                        result = this.matching_rows_CONDITIONAL( { key: clause, value: clauses[clause] }, result );
                     }
                     break;
                 case "CLAUSE_OR":
-                    result = matching_rows_OR( clauses[clause], result );
+                    result = this.matching_rows_OR( clauses[clause], result );
                     break;
                 default:
                     break;
@@ -741,7 +766,7 @@
 
         sortMaster: function ()
         {
-            sortArrayOfObjectsByKeys( master );
+            sortArrayOfObjectsByKeys( this.master );
         }
 
     }; // db_set.prototype
@@ -781,6 +806,7 @@
         }
 
 
+        // 1) parse config, 2) set paths, 3) new db_set() & set paths in it, 4) return it
 
 
 
@@ -875,46 +901,8 @@
         _set_db_path();
 
 
+// FIXME: goes in db_set
 
-        //
-        // read in db if it's there
-        //
-        if ( fs.existsSync( this.db_path ) ) 
-        {
-            data = fs.readFileSync(this.db_path,{encoding:"utf8"});
-
-            // convert into master format
-            master = JSON.parse( data );
-
-            // next _id is 1 greater than highest _id
-            var highest = 0;
-            var any_missing = false;
-            master.forEach(function(row) {
-                if ( ! row['_id'] )
-                    any_missing = true;
-                else if ( row['_id'] > highest ) {
-                    highest = row['_id'];
-                }
-            });
-            // rows w/o _id need to have one added 
-            if ( any_missing ) {
-                master.forEach(function(r) {
-                    if ( !r['_id'] ) {
-                        r['_id'] = ++highest;
-                    }
-                });
-            }
-        
-            //_id = master.length;
-            _id = highest;
-            
-            // sort in place:
-            // - sort each object
-            // - sort array by leading keys
-        } 
-        else {
-            needs_write = 1;
-        }
 
     }; // buryat.open
 
