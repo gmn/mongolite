@@ -1,8 +1,8 @@
 
 var p = function(s) { console.log(s); };
 var json = JSON.stringify;
-var buryat = require('../buryat');
-var db = buryat.open();
+var mongolite = require('../mongolite');
+var db = mongolite.open();
 db.insert( [{movie:"Jaws",director:"Stephen Spielberg"},{movie:"Stalker",director:"Andrej Tarkovski",rating:"5/5"},{movie:"Caddy Shack",rating:"4/5"}] );
 
 var res = db.find(/.*/);

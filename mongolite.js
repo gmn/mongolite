@@ -1,14 +1,14 @@
 /**
 
-    buryat.js   A tiny, self-contained, single file database that aims to support a useful
+    mongolite.js   A tiny, self-contained, single file database that aims to support a useful
                 subset of MongoDB commands.  Its per-DB storage is a single JSON string, which can be 
                 stored anywhere: in the server's file-system, or localStorage in the browser.
-                See buryat.org for more details and documentation, https://github.com/gmn/buryat
+                See mongolite.org for more details and documentation, https://github.com/gmn/mongolite
                 for new releases and code.
   
 */
 
-(function(buryat) 
+(function(mongolite) 
 {
     'use strict';
 
@@ -35,6 +35,12 @@
         default:
             return s;
         }
+    }
+
+    function classof(o) {
+        if (o === null) return "Null";
+        if (o === undefined) return "Undefined";
+        return Object.prototype.toString.call(o).slice(8,-1);
     }
 
     function detect_platform() {
@@ -235,12 +241,12 @@
 
     /**
      *
-     * Class: db_set
+     * Class: db_object
      *  - returned by open()
      *  - contains entire database w/ accessor methods
      *
      */
-    function db_set( config ) 
+    function db_object( config ) 
     {
         this.platform = config.platform;
         this.db_path = config.db_path;
@@ -255,7 +261,7 @@
         if ( this.platform === "browser" )
         {
             var name = this.db_name.trim();
-            this.db_name = ( !name || name.length===0 || name === "test.db" ) ? 'buryat' : name;
+            this.db_name = ( !name || name.length===0 || name === "test.db" ) ? 'mongolite' : name;
 
             if ( window.localStorage && localStorage.hasOwnProperty( this.db_name ) ) {
                 var string = localStorage[this.db_name];
@@ -321,7 +327,7 @@
         }; */
     }
 
-    db_set.prototype = {
+    db_object.prototype = {
 
         //////////////////////////////////////////////////
         //
@@ -336,7 +342,7 @@
                     fs.writeFileSync( this.db_path, JSON.stringify(this.master), {encoding:"utf8",mode:mode,flag:'w'} );
                 }
                 catch(e) {
-                    console.log( "buryat: error: failed to write: \""+this.db_path+'"' );
+                    console.log( "mongolite: error: failed to write: \""+this.db_path+'"' );
                 }
             } else if ( this.platform === "browser" ) {
                 localStorage[this.db_name] = JSON.stringify(this.master);
@@ -514,6 +520,12 @@
                     n.getDate() + 'T' + 
                     n.toUTCString().replace( /.*(\d\d:\d\d:\d\d).*/, "$1" ) + '.000Z';
         }, // this.now
+
+        // returns date object set to ISO string input
+        toDate: function( isostring )
+        {
+            return new Date( isostring );
+        },
 
         count: function() {
             return this.master.length;
@@ -791,7 +803,7 @@
             sortArrayOfObjectsByKeys( this.master );
         }
 
-    }; // db_set.prototype
+    }; // db_object.prototype
 
 
     /**
@@ -799,7 +811,7 @@
         - opens physical database (new one is created if non-existent)
         - returns handle to new db_object
     */
-    buryat.open = function ( config )
+    mongolite.open = function ( config )
     {
         // private variables
         var that = this;
@@ -822,10 +834,10 @@
             else 
                 _name = ( config && config.db_name ) ? config.db_name : '';
 
-            return new db_set( {"platform":"browser",db_name:_name} );
+            return new db_object( {"platform":"browser",db_name:_name} );
         default:
             p( "unknown platform" );
-            return buryat;
+            return mongolite;
         }
 
         function server_open( config )
@@ -912,18 +924,18 @@
                     that.db_path = that.db_dir + '/' + that.db_name;
             }
 
-            return new db_set( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform} );
+            return new db_object( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform} );
         } // server_open()
 
-    }; // buryat.open
+    }; // mongolite.open
 
     try {
         if ( window )
-            window.buryat = buryat;
+            window.mongolite = mongolite;
     } catch(e) {
     }
 
-    return buryat;
+    return mongolite;
 
 })(typeof exports === "undefined" ? {} : exports);
 

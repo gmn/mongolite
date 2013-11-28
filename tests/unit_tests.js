@@ -72,8 +72,8 @@ else
 
 //process.exit(0);
 
-var buryat = require('../buryat');
-var db = buryat.open( db_name );
+var mongolite = require('../mongolite');
+var db = mongolite.open( db_name );
 //db.save();
 
 U.p( "\nPATHS: " );
