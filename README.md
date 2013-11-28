@@ -18,6 +18,15 @@ var result = db.find( /regex/ );            // ** find() command works like Mong
                                             //    as well as chainable methods like: .sort(), .limit(), .skip(), ..
 ```
 
+## In the Works
+
+1. Better documentation; Website.
+ 
+2. Feature Roadmap: which features will be implemented next, roughly in order.
+
+3. Sample projects built on mongolite demonstrating its features and functionality.
+
+
 ## Contact 
 
 Mail: greg AT naughton.org for questions, comments
