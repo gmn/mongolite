@@ -216,7 +216,12 @@
             return this;
         },
 
-        skip: function( O ) {
+        skip: function( s ) {
+            var skp = Number(s);
+            if ( type_of(skp) !== "number" )
+                return this;
+            this._data.splice( 0, skp );
+            this.length = this._data.length;
             return this;
         },
 
