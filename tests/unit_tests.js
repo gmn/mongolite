@@ -9,13 +9,13 @@ function UnitTest() {
 }
 
 UnitTest.prototype = {
-    json: JSON.stringify,
+    stringify: JSON.stringify,
     p: function(s) { console.log(s); },
     po: function(s) { process.stdout.write(s); },
     exe: function(str) { this.p(' '+ str + ' --> ' + eval(str) ); },
 
     ob_eq: function ( A, B ) {
-        return this.json(A) === (B + '').trim();
+        return this.stringify(A) === (B + '').trim();
     },
 
     test: function(str,ans) { 
@@ -25,7 +25,7 @@ UnitTest.prototype = {
         if ( this.ob_eq( ret, ans ) ) {
             this.p( " -- Passed" );
         } else {
-            this.p( " -- Failed \n"+ans+"\n"+this.json(ret) );
+            this.p( " -- Failed \n"+ans+"\n"+this.stringify(ret) );
             ++this.num_failed;
 
             var debug = function() {
@@ -140,7 +140,7 @@ U.p(db.get_json());
 U.test( "db.update( {not:'here'}, {$set:{put:'anyway'}}, {upsert:true} )", 1 );
 U.p(db.get_json());
 
-U.p( "\nLIMIT & SKIP: ");
+U.p( "\nLIMIT: ");
 U.test( "db.remove()", 3 );
 
 var names = ["Dan","Fred","Amy","Ivette","Justin","Phoebe"];
@@ -160,11 +160,22 @@ for ( var lim = 0; lim <= ph+1; lim++ ) {
         U.test( "db.find( {name:'Phoebe'} ).limit("+lim+").count()", lim );
 }
 
-//names.forEach(function(n){
-//    U.test( "db.find( {name:"+n+"} ).limit(3)"
-//});
+/*
+    SKIP
+*/
 
+U.p( "\nSKIP: ");
+db.remove(); 
+var A = [];
+for ( var A =[], i = 0; i < 100; i++ ) {
+    A.push({'i':i});
+}
+db.insert(A);
+U.test("A=[];db.find(/.*/).skip(40).limit(20)._data.forEach(function(o){A.push(o['i']);});A;", '[40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]' );
 
+/*
+    DISTINCT
+*/
 U.p( "\nDISTINCT: " );
 
 //U.report();
