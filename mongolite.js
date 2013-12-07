@@ -10,7 +10,7 @@
 
 (function(mongolite) 
 {
-    'use strict';
+//    'use strict';
 
     //////////////////////////////////////////////////
     //
@@ -310,28 +310,92 @@ debugger;
                 // has .gz extension
                 if ( this.db_path.lastIndexOf('.gz') === this.db_path.length-3 ) {
                     this.use_gzip = true;
+
+/*
+    ASYNC = not what we want
                     var strstream = new simple_string_stream_t();
-                    var that = this; // <- db_object
-debugger;
-                    this.callback = function(data) {
+
+                    var callback = function(data) {
                         // through the magic of closure we receive our unzipped rewards
-debugger;
                         this.master = JSON.parse( data );
                         finish_db_setup.call(this);
                     }
-
-                    strstream.on('end', this.callback.bind(this) );
+                    strstream.on('end', callback.bind(this) );
                     
-                    /*
-                    strstream.on('end', function(data) {
-                        // through the magic of closure we receive our unzipped rewards
-debugger;
-                        that.master = JSON.parse( data );
-                        finish_db_setup.call(that);
-                    }); */
+//                    strstream.on('end', function(data) {
+//                        // through the magic of closure we receive our unzipped rewards
+//                        that.master = JSON.parse( data );
+//                        finish_db_setup.call(that);
+//                    }); 
                     var zlib = require('zlib');
                     var z_stream = fs.createReadStream( this.db_path );
                     z_stream.pipe( zlib.createGunzip() ).pipe( strstream );
+*/
+
+
+                    var zdata = fs.readFileSync(this.db_path,{encoding:"utf8",flag:'r'});
+                    var zlib = require('zlib');
+                    //var that = this;
+
+/* wait.for - throws error
+                    var wait = require('wait.for');
+                    function fiber_func() {
+                        var unzipped = wait.for( zlib.unzip, zdata );
+                        this.master = JSON.parse( unzipped );
+                        finish_db_setup.call(this);
+                    }
+                    wait.launchFiber(fiber_func.bind(this));
+*/
+
+
+/*
+sync - broke
+                    var Sync = require('sync');
+                    var that = this;
+                    function aSyncFunction(_data,callback) {
+                        zlib.unzip( _data, function(err, data) {
+                            if ( err ) {
+                                console.log( err.toString() );
+                                process.exit(-1);
+                            }
+                            callback(data);
+                        } );
+                    }
+                    Sync( function() {
+                        var data = aSyncFunction.sync(null,zdata);
+                        that.master = JSON.parse( data );
+                        finish_db_setup.call(that);
+                    } );
+*/
+
+                    process.stderr.write( "Gzip support not working yet\n" );
+                    process.exit(-1);
+
+                    
+/*
+                    var ar = [data];
+
+                    //var gunzip = zlib.createGunzip();
+                    function synchronize(data) {
+                        if ( data ) {
+                            zlib.unzip( data, function(err, data) {
+                                if ( err ) {
+                                    console.log( err.toString() );
+                                    process.exit(-1);
+                                }
+                                this.master = JSON.parse( data );
+                                return synchronize.call(this);
+                            });
+                        } else {
+                            return finish_db_setup.call(this);
+                        }
+                    }
+                    synchronize.call(this, ar.shift());
+*/
+
+    //zlib.gunzip( buf, sync );
+                    
+                    
 
                 // normal, no gzip
                 } else {
@@ -339,7 +403,6 @@ debugger;
 
                     // convert into master format
                     this.master = JSON.parse( data );
-
                     finish_db_setup.call(this);
                 }
             }
