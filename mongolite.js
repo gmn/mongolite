@@ -154,6 +154,27 @@
     // Classes
     // 
 
+    function simple_string_stream_t()
+    {
+        this.data = '';
+        this.end_callback = null;
+        this.write = function ( data ) {
+            this.data += data;
+        };
+        this.end = function () {
+            if ( this.end_callback )
+                this.end_callback( this.data );
+        };
+        this.on = function( act, callback ) {
+            if ( act === 'end' && callback ) {
+                this.end_callback = callback;
+            }
+        };
+        this.once = function( act, callback) { };
+        this.emit = function( action, param ) { };
+    }
+
+
     /**
      *
      * Class: db_result
@@ -257,12 +278,15 @@
         this.db_path = config.db_path;
         this.db_dir = config.db_dir;
         this.db_name = config.db_name;
+        this.use_gzip = config.use_gzip || false;
+
         this.master = [];
         this._id = 0;
 
         //
         // read in db if it's there
         //
+        // BROWSER
         if ( this.platform === "browser" )
         {
             var name = this.db_name.trim();
@@ -272,64 +296,103 @@
                 var string = localStorage[this.db_name];
                 this.master = JSON.parse( string );
             }
+
+            finish_db_setup.call(this);
         }
+
+        // SERVER
         else if ( this.platform === "node_module" )
         {
+debugger;
             var fs = require('fs');
             if ( fs.existsSync( this.db_path ) ) 
             {
-                var data = fs.readFileSync(this.db_path,{encoding:"utf8",flag:'r'});
+                // has .gz extension
+                if ( this.db_path.lastIndexOf('.gz') === this.db_path.length-3 ) {
+                    this.use_gzip = true;
+                    var strstream = new simple_string_stream_t();
+                    var that = this; // <- db_object
+debugger;
+                    this.callback = function(data) {
+                        // through the magic of closure we receive our unzipped rewards
+debugger;
+                        this.master = JSON.parse( data );
+                        finish_db_setup.call(this);
+                    }
 
-                // convert into master format
-                this.master = JSON.parse( data );
+                    strstream.on('end', this.callback.bind(this) );
+                    
+                    /*
+                    strstream.on('end', function(data) {
+                        // through the magic of closure we receive our unzipped rewards
+debugger;
+                        that.master = JSON.parse( data );
+                        finish_db_setup.call(that);
+                    }); */
+                    var zlib = require('zlib');
+                    var z_stream = fs.createReadStream( this.db_path );
+                    z_stream.pipe( zlib.createGunzip() ).pipe( strstream );
+
+                // normal, no gzip
+                } else {
+                    var data = fs.readFileSync(this.db_path,{encoding:"utf8",flag:'r'});
+
+                    // convert into master format
+                    this.master = JSON.parse( data );
+
+                    finish_db_setup.call(this);
+                }
             }
         }
 
-
-        if ( this.master.length > 0 ) 
+        function finish_db_setup() 
         {
-            // next _id is 1 greater than highest _id
-            var highest = 0;
-            var any_missing = false;
-            this.master.forEach(function(row) {
-                if ( ! row['_id'] )
-                    any_missing = true;
-                else if ( row['_id'] > highest ) {
-                    highest = row['_id'];
-                }
-            });
-
-            // rows w/o _id need to have one added 
-            if ( any_missing ) {
-                this.master.forEach(function(r) {
-                    if ( !r['_id'] ) {
-                        r['_id'] = ++highest;
+debugger;
+            if ( this.master.length > 0 ) 
+            {
+                // next _id is 1 greater than highest _id
+                var highest = 0;
+                var any_missing = false;
+                this.master.forEach(function(row) {
+                    if ( ! row['_id'] )
+                        any_missing = true;
+                    else if ( row['_id'] > highest ) {
+                        highest = row['_id'];
                     }
                 });
-            }
-        
-            this._id = highest;
+
+                // rows w/o _id need to have one added 
+                if ( any_missing ) {
+                    this.master.forEach(function(r) {
+                        if ( !r['_id'] ) {
+                            r['_id'] = ++highest;
+                        }
+                    });
+                }
             
-            // sort in place ?
-            // - sort each object
-            // - sort array by leading keys
-        }
+                this._id = highest;
+                
+                // sort in place ?
+                // - sort each object
+                // - sort array by leading keys
+            }
 
-        /* 
-        return {
-            db_name: this.db_name,
-            db_dir: this.db_dir,
-            db_path: this.db_path,
+            /* 
+            return {
+                db_name: this.db_name,
+                db_dir: this.db_dir,
+                db_path: this.db_path,
 
-            save: this.save,
-            insert: this.insert,
-            update: this.update,
-            find: this.find,
-            remove: this.remove,
-            get_json: this.get_json,
-            now: this.now,
-            count: this.count
-        }; */
+                save: this.save,
+                insert: this.insert,
+                update: this.update,
+                find: this.find,
+                remove: this.remove,
+                get_json: this.get_json,
+                now: this.now,
+                count: this.count
+            }; */
+        } // finish_db_setup
     }
 
     db_object.prototype = {
@@ -340,14 +403,26 @@
         //
         save: function(_mode) 
         {
-            if ( this.platform === "node_module" ) {
+            if ( this.platform === "node_module" ) 
+            {
                 var mode = _mode || 438; // 0666;
-                try {
-                    var fs = require('fs');
-                    fs.writeFileSync( this.db_path, JSON.stringify(this.master), {encoding:"utf8",mode:mode,flag:'w'} );
-                }
-                catch(e) {
-                    console.log( "mongolite: error: failed to write: \""+this.db_path+'"' );
+                var fs = require('fs');
+
+                if ( this.use_gzip ) {
+                    var ostream = fs.createWriteStream( this.db_path );                    
+                    var zlib = require('zlib');
+                    var Stream = require('stream');
+                    var in_stream = new Stream();
+                    in_stream.pipe(zlib.createGzip()).pipe(ostream);
+                    in_stream.emit('data', JSON.stringify(this.master) );
+                    in_stream.emit('end');
+                } else {
+                    try {
+                        fs.writeFileSync( this.db_path, JSON.stringify(this.master), {encoding:"utf8",mode:mode,flag:'w'} );
+                    }
+                    catch(e) {
+                        console.log( "mongolite: error: failed to write: \""+this.db_path+'"' );
+                    }
                 }
             } else if ( this.platform === "browser" ) {
                 localStorage[this.db_name] = JSON.stringify(this.master);
@@ -457,6 +532,7 @@
 
         find: function( match ) 
         {
+debugger;
             var res = this.do_query( match );
             var dbres = new db_result( res );
             res = null;
@@ -831,6 +907,8 @@
             this.db_name    = 'test.db';
             this.db_dir     = path.resolve(__dirname);
             this.db_path    = 0;
+//            this.use_gzip   = false; // defaults to off; can be set by either: method() or {config}
+                                     // also: sets to ON automatically if filetype opened is Gzip
             return server_open( config );
         case "browser":
             var _name = '';
@@ -847,7 +925,7 @@
 
         function server_open( config )
         {
-            var parm_list = ['db_name','db_dir','db_path'];
+            var parm_list = ['db_name','db_dir','db_path','use_gzip'];
 
             // assume it is either (in this order): path, fullpath, filename
             if ( arguments.length > 0 && typeof config === "string" ) 
@@ -888,16 +966,17 @@
             // overwrite from user-supplied config settings
             else if ( arguments.length > 0 && typeof config === "object" ) 
             {
+
                 for ( var i = 0; i < parm_list.length; i++ ) 
                 {
                     if ( config[parm_list[i]] ) {
-                        if ( parm_list[i] === "db_path" ) {
+                        if ( parm_list[i] === "db_path" ) 
                             config[parm_list[i]] = path.resolve( config[parm_list[i]] );
-                        }
                         else if ( parm_list[i] === "db_dir" )
                             config[parm_list[i]] = path.resolve( config[parm_list[i]] );
                         else if ( parm_list[i] === 'db_name' )
                             config[parm_list[i]] = clip_all_leading( config[parm_list[i]], '/' );
+                        
                         that[parm_list[i]] = config[parm_list[i]];
                     }
                 }
@@ -929,10 +1008,16 @@
                     that.db_path = that.db_dir + '/' + that.db_name;
             }
 
-            return new db_object( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform} );
+            return new db_object( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform,use_gzip:that.use_gzip} );
         } // server_open()
 
     }; // mongolite.open
+
+    mongolite.useGzip = function() {
+        if ( arguments.length > 0 ) {
+            this.use_gzip = arguments[0];
+        }
+    }
 
     try {
         if ( window )
