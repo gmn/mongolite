@@ -336,7 +336,16 @@
                 if ( this.db_path.lastIndexOf('.gz') === this.db_path.length-3 ) {
                     this.use_gzip = true;
 
-                    
+                var gzbz = require('gzbz');
+                var gunzip = new gzbz.Gunzip;        
+                gunzip.init( {encoding:'utf8'} );
+                var gzdata = fs.readFileSync(this.db_path,{encoding:"binary",flag:'r'});
+                var inflated = gunzip.inflate( gzdata, "binary" );
+                gunzip.end();
+
+                // convert into master format
+                this.master = JSON.parse( inflated );
+                finish_db_setup.call(this);
 
 /*
     ASYNC = not what we want
