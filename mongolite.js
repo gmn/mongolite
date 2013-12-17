@@ -330,22 +330,27 @@
         else if ( this.platform === "node_module" )
         {
             var fs = require('fs');
+
+            // presence of .gz extension sets use_gzip
+            if ( this.db_path.lastIndexOf('.gz') === this.db_path.length-3 ) 
+                this.use_gzip = true;
+
+            // if db_path exists, load it
             if ( fs.existsSync( this.db_path ) ) 
             {
-                // has .gz extension
-                if ( this.db_path.lastIndexOf('.gz') === this.db_path.length-3 ) {
-                    this.use_gzip = true;
+                // open the gzip way
+                if ( this.use_gzip ) 
+                {
+                    var gzbz = require('gzbz');
+                    var gunzip = new gzbz.Gunzip;        
+                    gunzip.init( {encoding:'utf8'} );
+                    var gzdata = fs.readFileSync(this.db_path,{encoding:"binary",flag:'r'});
+                    var inflated = gunzip.inflate( gzdata, "binary" );
+                    gunzip.end();
 
-                var gzbz = require('gzbz');
-                var gunzip = new gzbz.Gunzip;        
-                gunzip.init( {encoding:'utf8'} );
-                var gzdata = fs.readFileSync(this.db_path,{encoding:"binary",flag:'r'});
-                var inflated = gunzip.inflate( gzdata, "binary" );
-                gunzip.end();
-
-                // convert into master format
-                this.master = JSON.parse( inflated );
-                finish_db_setup.call(this);
+                    // convert into master format
+                    this.master = JSON.parse( inflated );
+                    finish_db_setup.call(this);
 
 /*
     ASYNC = not what we want
@@ -517,20 +522,35 @@ sync - broke
                 var mode = _mode || 438; // 0666;
                 var fs = require('fs');
 
+                // if parent application quits suddenly, write may be voided. 
+                // writes must be ensured. perhaps a better way to do this?  Best possible case: 
+                //  have both async writes and ensured writes, even on sudden process.exit() 
+                var use_async = false;
+                var gzip_lvl = 1; // 5 is middle. bias heavily towards speed since using gzip makes this I/O bound 
+
                 if ( this.use_gzip ) {
-                    var ostream = fs.createWriteStream( this.db_path );                    
-                    var zlib = require('zlib');
-                    var Stream = require('stream');
-                    var in_stream = new Stream();
-                    in_stream.pipe(zlib.createGzip()).pipe(ostream);
-                    in_stream.emit('data', JSON.stringify(this.master) );
-                    in_stream.emit('end');
+                    if ( use_async ) {
+                        var ostream = fs.createWriteStream( this.db_path );                    
+                        var zlib = require('zlib');
+                        var Stream = require('stream');
+                        var in_stream = new Stream();
+                        in_stream.pipe(zlib.createGzip()).pipe(ostream);
+                        in_stream.emit('data', JSON.stringify(this.master) );
+                        in_stream.emit('end');
+                    } else {
+                        var gzbz = require('gzbz');
+                        var gzip = new gzbz.Gzip();
+                        gzip.init( {encoding:"binary", level: gzip_lvl /* 1<=level<=9 */} );
+                        var gz1 = gzip.deflate( JSON.stringify(this.master) );
+                        var gz2 = gzip.end(); // important to capture end!
+                        var gzdata = gz1 + gz2;
+                        fs.writeFileSync( this.db_path, gzdata, {encoding:"binary",mode:mode,flag:'w'} );
+                    }
                 } else {
                     try {
                         fs.writeFileSync( this.db_path, JSON.stringify(this.master), {encoding:"utf8",mode:mode,flag:'w'} );
-                    }
-                    catch(e) {
-                        console.log( "mongolite: error: failed to write: \""+this.db_path+'"' );
+                    } catch(e) {
+                        console.log( "mongolite: error: failed writing: \""+this.db_path+'"' );
                     }
                 }
             } else if ( this.platform === "browser" ) {
@@ -1017,7 +1037,7 @@ sync - broke
             this.db_name    = 'test.db';
             this.db_dir     = path.resolve(__dirname);
             this.db_path    = 0;
-//            this.use_gzip   = false; // defaults to off; can be set by either: method() or {config}
+            this.use_gzip   = false; // defaults to off; can be set by either: method() or {config}
                                      // also: sets to ON automatically if filetype opened is Gzip
             return server_open( config );
         case "browser":
