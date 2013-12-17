@@ -107,7 +107,6 @@
             return O;
 
         var keys = [];
-
         for ( var i in O ) {
             if ( O.hasOwnProperty(i) ) {
                 keys.push( {key:i,value:O[i]} );
@@ -127,7 +126,34 @@
         return nO;
     }
 
-        // sorts in place
+    function addToFront( obj, _key, _value ) {
+         if ( typeof obj !== "object" )
+            return obj;
+
+        // get existing keys
+        var keys = [];
+        for ( var key in obj ) {
+            if ( obj.hasOwnProperty(key) ) {
+                keys.push(key);
+            }
+        }
+
+        // empty, return it
+        if ( keys.length === 0 )
+            return obj;
+
+        var newObj = {};
+        newObj[ _key ] = _value; // set in the front
+
+        // now transfer the rest
+        keys.forEach(function(key) {
+            newObj[key] = obj[key];
+        });
+       
+        return newObj;
+    }
+
+    // sorts in place
     function sortArrayOfObjectsByKeys( array_of_objs )
     {
         if ( type_of(array_of_objs) !== "array" )
@@ -303,13 +329,14 @@
         // SERVER
         else if ( this.platform === "node_module" )
         {
-debugger;
             var fs = require('fs');
             if ( fs.existsSync( this.db_path ) ) 
             {
                 // has .gz extension
                 if ( this.db_path.lastIndexOf('.gz') === this.db_path.length-3 ) {
                     this.use_gzip = true;
+
+                    
 
 /*
     ASYNC = not what we want
@@ -333,9 +360,11 @@ debugger;
 */
 
 
+/*
                     var zdata = fs.readFileSync(this.db_path,{encoding:"utf8",flag:'r'});
                     var zlib = require('zlib');
                     //var that = this;
+*/
 
 /* wait.for - throws error
                     var wait = require('wait.for');
@@ -368,8 +397,10 @@ sync - broke
                     } );
 */
 
+/*
                     process.stderr.write( "Gzip support not working yet\n" );
                     process.exit(-1);
+*/
 
                     
 /*
@@ -410,7 +441,6 @@ sync - broke
 
         function finish_db_setup() 
         {
-debugger;
             if ( this.master.length > 0 ) 
             {
                 // next _id is 1 greater than highest _id
@@ -426,11 +456,18 @@ debugger;
 
                 // rows w/o _id need to have one added 
                 if ( any_missing ) {
+                    /*
                     this.master.forEach(function(r) {
                         if ( !r['_id'] ) {
                             r['_id'] = ++highest;
                         }
-                    });
+                    }); */
+
+                    for ( var i = 0, l = this.master.length; i < l; i++ ) {
+                        if ( ! this.master[i]['_id'] ) {
+                            this.master[i] = addToFront( this.master[i], '_id', ++highest );
+                        }
+                    }
                 }
             
                 this._id = highest;
@@ -504,8 +541,10 @@ debugger;
                     return -1;
                 }
 
-                if ( !obj["_id"] ) 
-                    obj["_id"] = ++that._id;
+                if ( !obj["_id"] ) {
+//                    obj["_id"] = ++that._id;
+                    obj = addToFront( obj, '_id', ++that._id );
+                }
 
                 that.master.push(obj);
 
@@ -595,7 +634,6 @@ debugger;
 
         find: function( match ) 
         {
-debugger;
             var res = this.do_query( match );
             var dbres = new db_result( res );
             res = null;
