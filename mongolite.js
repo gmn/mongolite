@@ -1,10 +1,26 @@
 /**
 
-    mongolite.js   A tiny, self-contained, single file database that aims to support a useful
-                subset of MongoDB commands.  Its per-DB storage is a single JSON string, which can be 
-                stored anywhere: in the server's file-system, or localStorage in the browser.
-                See mongolite.org for more details and documentation, https://github.com/gmn/mongolite
-                for new releases and code.
+    mongolite.js   A tiny, self-contained, single file database that 
+                    uses JSON for storage. It supports a small, useful 
+                    subset of MongoDB-type commands.
+
+                    The DB is a array of objects, which are stored as a 
+                    plaintext JSON string. It also works in the browser.
+
+                    See 
+                        https://github.com/gmn/mongolite 
+
+                    for more details, documentation, new releases and code.
+
+    usage example:
+
+        var mongolite = require('mongolite');
+        var db = mongolite.open('database_name');
+
+        //...operations...
+        var res = db.find({record:"matching term"});
+        db.insert({record:"new record"});
+        db.save();
   
 */
 
@@ -175,31 +191,11 @@
         return array_of_objs;
     }
 
+
     //////////////////////////////////////////////////
     // 
     // Classes
     // 
-
-    function simple_string_stream_t()
-    {
-        this.data = '';
-        this.end_callback = null;
-        this.write = function ( data ) {
-            this.data += data;
-        };
-        this.end = function () {
-            if ( this.end_callback )
-                this.end_callback( this.data );
-        };
-        this.on = function( act, callback ) {
-            if ( act === 'end' && typeof callback === 'function' ) {
-                this.end_callback = callback;
-            }
-        };
-        this.once = function( act, callback) { };
-        this.emit = function( action, param ) { };
-    }
-
 
     /**
      *
@@ -309,11 +305,20 @@
         this.master = [];
         this._id = 0;
 
+
+        // can populate db explicitly using a json string
+        // - if {}.data set, will override the other loading methods 
+        // - database will still save to named location, normally
+        if ( config.data ) {
+            this.master = JSON.parse( config.data );
+            finish_db_setup.call(this);
+        }
+
         //
         // read in db if it's there
         //
         // BROWSER
-        if ( this.platform === "browser" )
+        else if ( this.platform === "browser" )
         {
             var name = this.db_name.trim();
             this.db_name = ( !name || name.length===0 || name === "test.db" ) ? 'mongolite' : name;
@@ -351,96 +356,6 @@
                     // convert into master format
                     this.master = JSON.parse( inflated );
                     finish_db_setup.call(this);
-
-/*
-    ASYNC = not what we want
-                    var strstream = new simple_string_stream_t();
-
-                    var callback = function(data) {
-                        // through the magic of closure we receive our unzipped rewards
-                        this.master = JSON.parse( data );
-                        finish_db_setup.call(this);
-                    }
-                    strstream.on('end', callback.bind(this) );
-                    
-//                    strstream.on('end', function(data) {
-//                        // through the magic of closure we receive our unzipped rewards
-//                        that.master = JSON.parse( data );
-//                        finish_db_setup.call(that);
-//                    }); 
-                    var zlib = require('zlib');
-                    var z_stream = fs.createReadStream( this.db_path );
-                    z_stream.pipe( zlib.createGunzip() ).pipe( strstream );
-*/
-
-
-/*
-                    var zdata = fs.readFileSync(this.db_path,{encoding:"utf8",flag:'r'});
-                    var zlib = require('zlib');
-                    //var that = this;
-*/
-
-/* wait.for - throws error
-                    var wait = require('wait.for');
-                    function fiber_func() {
-                        var unzipped = wait.for( zlib.unzip, zdata );
-                        this.master = JSON.parse( unzipped );
-                        finish_db_setup.call(this);
-                    }
-                    wait.launchFiber(fiber_func.bind(this));
-*/
-
-
-/*
-sync - broke
-                    var Sync = require('sync');
-                    var that = this;
-                    function aSyncFunction(_data,callback) {
-                        zlib.unzip( _data, function(err, data) {
-                            if ( err ) {
-                                console.log( err.toString() );
-                                process.exit(-1);
-                            }
-                            callback(data);
-                        } );
-                    }
-                    Sync( function() {
-                        var data = aSyncFunction.sync(null,zdata);
-                        that.master = JSON.parse( data );
-                        finish_db_setup.call(that);
-                    } );
-*/
-
-/*
-                    process.stderr.write( "Gzip support not working yet\n" );
-                    process.exit(-1);
-*/
-
-                    
-/*
-                    var ar = [data];
-
-                    //var gunzip = zlib.createGunzip();
-                    function synchronize(data) {
-                        if ( data ) {
-                            zlib.unzip( data, function(err, data) {
-                                if ( err ) {
-                                    console.log( err.toString() );
-                                    process.exit(-1);
-                                }
-                                this.master = JSON.parse( data );
-                                return synchronize.call(this);
-                            });
-                        } else {
-                            return finish_db_setup.call(this);
-                        }
-                    }
-                    synchronize.call(this, ar.shift());
-*/
-
-    //zlib.gunzip( buf, sync );
-                    
-                    
 
                 // normal, no gzip
                 } else {
@@ -1037,17 +952,31 @@ sync - broke
             this.db_name    = 'test.db';
             this.db_dir     = path.resolve(__dirname);
             this.db_path    = 0;
-            this.use_gzip   = false; // defaults to off; can be set by either: method() or {config}
-                                     // also: sets to ON automatically if filetype opened is Gzip
+
+            // defaults to off; can be set by either: method() or config{}
+            // also: sets to ON automatically if file opened has *.gz extension
+            this.use_gzip   = false; 
+
             return server_open( config );
+
         case "browser":
             var _name = '';
+            var data = undefined;
             if ( type_of(config) === "string" )
                 _name = config;
-            else 
+            else if ( type_of(config) === "object" ) {
                 _name = ( config && config.db_name ) ? config.db_name : '';
+                if ( config.string )
+                    data = config.string;
+                else if ( config.data )
+                    data = config.data;
+            }
 
-            return new db_object( {"platform":"browser",db_name:_name} );
+            if ( data ) 
+                return new db_object( {"platform":"browser",db_name:_name,data:data} );
+            else
+                return new db_object( {"platform":"browser",db_name:_name} );
+
         default:
             p( "unknown platform" );
             return mongolite;
@@ -1137,8 +1066,10 @@ sync - broke
                 else
                     that.db_path = that.db_dir + '/' + that.db_name;
             }
+    
+            var _data = config && config.data ? config.data : undefined;
 
-            return new db_object( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform,use_gzip:that.use_gzip} );
+            return new db_object( {db_path:that.db_path,db_dir:that.db_dir,db_name:that.db_name,"platform":that.platform,use_gzip:that.use_gzip,data:_data} );
         } // server_open()
 
     }; // mongolite.open
