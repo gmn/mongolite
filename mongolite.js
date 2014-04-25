@@ -192,7 +192,7 @@
                 this.end_callback( this.data );
         };
         this.on = function( act, callback ) {
-            if ( act === 'end' && callback ) {
+            if ( act === 'end' && typeof callback === 'function' ) {
                 this.end_callback = callback;
             }
         };
