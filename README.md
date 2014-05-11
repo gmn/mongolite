@@ -6,6 +6,8 @@ This project has been renamed project to [Queryable](https://github.com/gmn/quer
 
 ---
 
+*original documentation*
+
 Mongolite - A tiny, self-contained, single file database, written in pure Javascript, which aims to support a functional subset of MongoDB commands. It works seamlessly in both the client (browser) and the server (node.js).  Just include it in your project and go.  The database format is stored as human-readable JSON, one file per each database.
 
 ## Examples
